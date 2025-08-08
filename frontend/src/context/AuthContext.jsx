@@ -1,74 +1,58 @@
-// src/context/AuthContext.jsx
-import { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 
 const AuthContext = createContext(null);
 
-const setAuthToken = (token) => {
-  if (token) {
-    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-  } else {
-    delete axios.defaults.headers.common['Authorization'];
-  }
-};
-
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+    const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('token'));
+    const [user, setUser] = useState(null);
+    const navigate = useNavigate();
 
-  useEffect(() => {
-    const loadUserFromStorage = () => {
-      try {
-        const token = localStorage.getItem('luka_token');
-        const storedUser = localStorage.getItem('luka_user');
-        if (token && storedUser) {
-          setUser(JSON.parse(storedUser));
-          setAuthToken(token);
+    // On initial load, check for a token and set the auth header if it exists.
+    // This is the key fix for keeping the user logged in across page refreshes.
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        if (token) {
+            axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            setIsAuthenticated(true);
         }
-      } catch (error) {
-        console.error("Failed to load user from storage", error);
-      } finally {
-        setLoading(false);
-      }
+    }, []); // Empty dependency array ensures this runs only once on mount.
+
+    const login = async (username, password) => {
+        try {
+            const response = await axios.post('http://127.0.0.1:5000/login', {
+                username,
+                password
+            });
+            if (response.data.access_token) {
+                const token = response.data.access_token;
+                localStorage.setItem('token', token);
+                axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+                setIsAuthenticated(true);
+                navigate('/dashboard');
+            }
+        } catch (error) {
+            console.error('Login failed:', error);
+        }
     };
-    loadUserFromStorage();
-  }, []);
 
-  const login = async (email, password) => {
-    try {
-      const response = await axios.post('http://localhost:5000/api/login', { email, password });
-      if (response.data.access_token) {
-        const { access_token, user: userData } = response.data;
-        localStorage.setItem('luka_token', access_token);
-        localStorage.setItem('luka_user', JSON.stringify(userData));
-        setAuthToken(access_token);
-        setUser(userData);
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error("Login failed:", error);
-      logout();
-      return false;
-    }
-  };
-
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('luka_token');
-    localStorage.removeItem('luka_user');
-    setAuthToken(null);
-  };
-
-  const value = { user, loading, login, logout };
-
-  return (
-    <AuthContext.Provider value={value}>
-      {!loading && children}
-    </AuthContext.Provider>
-  );
+    const logout = () => {
+        localStorage.removeItem('token');
+        delete axios.defaults.headers.common['Authorization'];
+        setIsAuthenticated(false);
+        setUser(null);
+        navigate('/login');
+    };
+    
+    return (
+        <AuthContext.Provider value={{ isAuthenticated, user, login, logout }}>
+            {children}
+        </AuthContext.Provider>
+    );
 };
 
+// Custom hook to use the auth context
 export const useAuth = () => {
-  return useContext(AuthContext);
+    return useContext(AuthContext);
 };
